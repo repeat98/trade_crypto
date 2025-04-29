@@ -32,6 +32,9 @@ if not TELEGRAM_TOKEN or not CHAT_ID:
 scheduler = AsyncIOScheduler(timezone=timezone.utc)
 models: Dict[str, Dict[str, object]] = {}
 
+# Track last known probabilities to avoid duplicate alerts
+last_probs: Dict[str, Dict[str, float]] = {}
+
 # --- Helper: Notification via Telegram ---
 def send_telegram(text: str) -> None:
     """
@@ -71,9 +74,14 @@ def make_prediction(sym: str) -> Dict[str, Dict[str, str]]:
     feats   = get_feature_columns(df_feat)
     latest  = df_feat.iloc[-1:]
 
+    # Initialize per-symbol last_probs if missing
+    if sym not in last_probs:
+        last_probs[sym] = {}
+
     advice: Dict[str, Dict[str, str]] = {}
     for name, mdl in models[sym].items():
         prob = mdl.predict_proba(latest[feats].values)[0, 1]
+        prob_val = prob
         signal = 'HOLD'
         if prob > 0.55:
             signal = 'BUY'
@@ -89,8 +97,9 @@ def make_prediction(sym: str) -> Dict[str, Dict[str, str]]:
             'probability': f"{prob:.2f}"
         }
 
-        # Send Telegram alert on high confidence
-        if prob >= 0.75 or prob <= 0.25:
+        # Only send alert if high confidence and probability changed
+        last = last_probs[sym].get(name)
+        if (prob_val >= 0.75 or prob_val <= 0.25) and (last is None or prob_val != last):
             emoji = '🚀' if signal == 'BUY' else '🔻'
             text  = (
                 f"<b>{html.escape(sym)} {html.escape(signal)} Alert</b> {emoji}\n"
@@ -100,6 +109,8 @@ def make_prediction(sym: str) -> Dict[str, Dict[str, str]]:
                 f"<i>Time: {datetime.now(timezone.utc).isoformat()} UTC</i>"
             )
             send_telegram(text)
+        # Update last known probability
+        last_probs[sym][name] = prob_val
 
     return advice
 
@@ -107,6 +118,9 @@ def make_prediction(sym: str) -> Dict[str, Dict[str, str]]:
 async def daily_job():
     print(f"[{datetime.now(timezone.utc).isoformat()}] Generating advice and summary...")
     global models
+    global last_probs
+    # Reset last known probabilities at each daily retrain
+    last_probs = {sym: {} for sym in SYMBOLS}
     # Retrain models
     models = load_models(SYMBOLS)
     # Gather advice for summary
