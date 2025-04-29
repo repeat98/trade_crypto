@@ -133,10 +133,10 @@ async def interval_job():
 
 def schedule_jobs():
     h, m = map(int, ADVICE_TIME_UTC.split(':'))
-    # Schedule 10-minute polling for alerts
-    scheduler.add_job(lambda: asyncio.create_task(interval_job()), 'cron', minute='*/10')
-    # Schedule daily retrain and summary
-    scheduler.add_job(lambda: asyncio.create_task(daily_job()), 'cron', hour=h, minute=m)
+    # Schedule 10-minute polling for alerts as a coroutine
+    scheduler.add_job(interval_job, 'cron', minute='*/10')
+    # Schedule daily retrain and summary as a coroutine
+    scheduler.add_job(daily_job, 'cron', hour=h, minute=m)
 
 async def main():
     # Schedule and start the daily job
