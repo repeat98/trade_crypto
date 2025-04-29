@@ -133,8 +133,8 @@ async def interval_job():
 
 def schedule_jobs():
     h, m = map(int, ADVICE_TIME_UTC.split(':'))
-    # Schedule 10-minute polling for alerts as a coroutine
-    scheduler.add_job(interval_job, 'cron', minute='*/10')
+    # Schedule polling for alerts every 5 seconds as a coroutine
+    scheduler.add_job(interval_job, 'interval', seconds=5)
     # Schedule daily retrain and summary as a coroutine
     scheduler.add_job(daily_job, 'cron', hour=h, minute=m)
 
