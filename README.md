@@ -62,7 +62,10 @@ A comprehensive pipeline for cryptocurrency trading that includes data fetching,
 The main pipeline can be run using:
 
 ```bash
-python main.py
+python3 main.py \  --symbols BTC-USD ETH-USD BNB-USD SOL-USD XRP-USD ADA-USD AVAX-USD DOT-USD DOGE-USD MATIC-USD \
+            UNI-USD AAVE-USD MKR-USD SNX-USD ATOM-USD LINK-USD NEAR-USD \
+            SAND-USD MANA-USD AXS-USD XMR-USD ZEC-USD \
+  --capital 10000 \
 ```
 
 This will:
