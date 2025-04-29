@@ -1,5 +1,5 @@
 """
-main2.py
+main.py
 
 A pipeline for fetching, caching, feature-engineering, modeling, backtesting, and plotting equity curves for cryptocurrency symbols.
 Leverages yfinance for data, SQLAlchemy for caching, ta for technical indicators, and scikit-learn/XGBoost for machine learning.
@@ -36,6 +36,7 @@ from ta.volatility import AverageTrueRange
 from ta.volume import OnBalanceVolumeIndicator
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
 
 from dataclasses import dataclass
 
@@ -320,8 +321,19 @@ def train_and_evaluate(
     from sklearn.base import clone
     for name, model in models.items():
         mdl = clone(model)
-        eq, sharpe = backtest_model(df, feature_cols, mdl, test, 0.0)
-        metrics.append({'symbol': symbol, 'model': name, 'Sharpe': sharpe})
+        eq, sharpe, rets = backtest_model(df, feature_cols, mdl, test, 0.0)
+        # classification accuracy on the test set
+        y_pred = mdl.predict(test[feature_cols].values)
+        accuracy = accuracy_score(y_test, y_pred)
+        # trade win rate as percentage of positive returns
+        win_rate = (rets > 0).sum() / len(rets) * 100
+        metrics.append({
+            'symbol': symbol,
+            'model': name,
+            'Sharpe': sharpe,
+            'Accuracy': accuracy,
+            'Win Rate [%]': win_rate
+        })
         # plot equity
         plot_equity(eq, name, symbol, now_utc().strftime('%Y%m%d_%H%M%S'))
 
@@ -346,7 +358,7 @@ def backtest_model(
     model: ClassifierMixin,
     test: pd.DataFrame,
     threshold: float
-) -> Tuple[pd.Series, float]:
+) -> Tuple[pd.Series, float, pd.Series]:
     """Backtest the provided model on the test set, fitting it on the training portion prior to prediction.
     Args:
         df: Full DataFrame with features and target.
@@ -355,7 +367,8 @@ def backtest_model(
         test: Test DataFrame.
         threshold: Threshold for signal (unused here).
     Returns:
-        Tuple of equity curve series and Sharpe ratio."""
+        Tuple of equity curve series, Sharpe ratio, and returns series.
+    """
     # Fit the model on the training portion up to the start of the test set
     split_date = test.index[0]
     train_mask = df.index < split_date
@@ -373,7 +386,7 @@ def backtest_model(
     rets = test['close'].pct_change().fillna(0) * position.shift(1).fillna(0)
     eq = (1 + rets).cumprod() * 1.0  # capital normalized
     metrics = calculate_metrics(rets)
-    return eq, metrics['Sharpe']
+    return eq, metrics['Sharpe'], rets
 
 # ------------------------ Visualization ------------------------ #
 def plot_equity(
