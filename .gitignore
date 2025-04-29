@@ -1,0 +1,15 @@
+cache/
+models/
+plots/
+metrics/
+__pycache__/
+crypto_data.db
+.DS_Store
+*.log
+*.log.*
+*.log.*.*
+*.log.*.*.*
+*.log.*.*.*.*
+*.log.*.*.*.*.*
+*.log.*.*.*.*.*.*
+venv/
