@@ -13,3 +13,4 @@ crypto_data.db
 *.log.*.*.*.*.*
 *.log.*.*.*.*.*.*
 venv/
+.env
