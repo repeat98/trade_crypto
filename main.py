@@ -322,6 +322,18 @@ def train_and_evaluate(
     for name, model in models.items():
         mdl = clone(model)
         eq, sharpe, rets = backtest_model(df, feature_cols, mdl, test, 0.0)
+        # Additional performance metrics
+        start = test.index[0]
+        end = test.index[-1]
+        duration = (end - start).days
+        exposure = rets.ne(0).mean() * 100  # percent of days with a position
+        equity_final = eq.iloc[-1]
+        equity_peak = eq.max()
+        return_pct = (equity_final - 1.0) * 100
+        annual_return = (equity_final ** (252.0 / len(rets)) - 1.0) * 100
+        volatility_ann = rets.std() * (252 ** 0.5) * 100
+        max_drawdown = ((eq.cummax() - eq) / eq.cummax()).max() * 100
+        num_trades = rets.ne(0).sum()
         # classification accuracy on the test set
         y_pred = mdl.predict(test[feature_cols].values)
         accuracy = accuracy_score(y_test, y_pred)
@@ -330,7 +342,18 @@ def train_and_evaluate(
         metrics.append({
             'symbol': symbol,
             'model': name,
-            'Sharpe': sharpe,
+            'Start': start,
+            'End': end,
+            'Duration [days]': duration,
+            'Exposure Time [%]': exposure,
+            'Equity Final [$]': equity_final,
+            'Equity Peak [$]': equity_peak,
+            'Return [%]': return_pct,
+            'Return (Ann.) [%]': annual_return,
+            'Volatility (Ann.) [%]': volatility_ann,
+            'Sharpe Ratio': sharpe,
+            'Max. Drawdown [%]': max_drawdown,
+            '# Trades': num_trades,
             'Accuracy': accuracy,
             'Win Rate [%]': win_rate
         })
@@ -461,7 +484,7 @@ def main() -> None:
             logger.exception(f"Error processing {sym}: {e}")
 
     if all_metrics:
-        summary = pd.concat(all_metrics).sort_values('Sharpe', ascending=False)
+        summary = pd.concat(all_metrics).sort_values('Sharpe Ratio', ascending=False)
         Config.METRICS_DIR.mkdir(exist_ok=True)
         summary.to_csv(Config.METRICS_DIR / f"summary_{now_utc():%Y%m%d_%H%M%S}.csv", index=False)
         print(summary)
