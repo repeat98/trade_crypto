@@ -14,6 +14,35 @@ import pandas as pd
 # Import feature and backtest utilities from main pipeline
 from main import prepare_features, get_feature_columns, get_data, Config
 
+# --------------------------- State Management --------------------------- #
+STATE_FILE = BASE_DIR / 'trading_state.json'
+
+def load_state():
+    """Load the current trading state from file."""
+    if STATE_FILE.exists():
+        try:
+            with open(STATE_FILE, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("Corrupted state file, starting fresh")
+            return {}
+    return {}
+
+def save_state(state):
+    """Save the current trading state to file."""
+    with open(STATE_FILE, 'w') as f:
+        json.dump(state, f, indent=2, default=str)
+
+def update_state(last_run=None, status=None, error=None):
+    """Update the trading state with new information."""
+    state = load_state()
+    if last_run:
+        state['last_run'] = last_run
+    if status:
+        state['status'] = status
+    if error:
+        state['error'] = error
+    save_state(state)
 
 def load_best_models():
     """Load the latest metrics summary and return best model name by Sharpe for each symbol."""
@@ -248,18 +277,46 @@ def main():
     parser.add_argument('--symbols', nargs='+', required=True, help='List of symbols to trade')
     parser.add_argument('--capital', type=float, default=10000, help='Total capital to allocate')
     args = parser.parse_args()
+    
     logger.info(f"Starting realtime trading for symbols {args.symbols} with capital ${args.capital:.2f}")
+    
+    # Load previous state
+    state = load_state()
+    last_run = state.get('last_run')
+    if last_run:
+        last_run = datetime.fromisoformat(last_run)
+        logger.info(f"Resuming from last run at {last_run.isoformat()}")
+    
     while True:
         try:
-            run_day(args.capital, args.symbols)
+            now = datetime.now(timezone.utc)
+            today = now.date()
+            
+            # Check if we need to run today
+            if last_run and last_run.date() == today:
+                logger.info("Already ran today, waiting for next day")
+                next_run = datetime.combine(today + timedelta(days=1), dtime(0,5), tzinfo=timezone.utc)
+            else:
+                # Run trading for today
+                update_state(status='running')
+                run_day(args.capital, args.symbols)
+                update_state(last_run=now.isoformat(), status='completed')
+                next_run = datetime.combine(today + timedelta(days=1), dtime(0,5), tzinfo=timezone.utc)
+            
+            # Calculate sleep time
+            sleep_secs = (next_run - now).total_seconds()
+            if sleep_secs > 0:
+                logger.info(f"Sleeping {sleep_secs/3600:.2f}h until next run at {next_run.isoformat()}")
+                time.sleep(sleep_secs)
+            else:
+                logger.warning("Next run time is in the past, running immediately")
+                
         except Exception as e:
-            logger.exception(f"Error in daily run: {e}")
-        # sleep until next UTC midnight + 5 minutes
-        now = datetime.now(timezone.utc)
-        next_run = datetime.combine(now.date() + timedelta(days=1), dtime(0,5), tzinfo=timezone.utc)
-        sleep_secs = (next_run - now).total_seconds()
-        logger.info(f"Sleeping {sleep_secs/3600:.2f}h until next run at {next_run.isoformat()}")
-        time.sleep(max(sleep_secs, 0))
+            error_msg = f"Error in daily run: {str(e)}"
+            logger.exception(error_msg)
+            update_state(error=error_msg)
+            # Sleep for 5 minutes before retrying
+            time.sleep(300)
 
 if __name__ == '__main__':
     main()
