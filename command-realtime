@@ -1,0 +1,2 @@
+python3 realtime_trader.py --symbols XMR-USD BTC-USD AVAX-USD SOL-USD NEAR-USD\
+    --capital 1000 

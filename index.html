@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Crypto Dashboard - 2025-04-30</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px; }
+        h1 { text-align: center; }
+        .chart-container { width: 600px; margin: 40px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <h1>Crypto Dashboard for 2025-04-30</h1>
+    <div class="chart-container"><canvas id="modelsChart"></canvas></div>
+    <div class="chart-container"><canvas id="allocationsChart"></canvas></div>
+    <div class="chart-container"><canvas id="financeChart"></canvas></div>
+    <div class="chart-container"><canvas id="tradesChart"></canvas></div>
+
+    <script>
+        fetch('/data')
+            .then(response => response.json())
+            .then(dashboardData => {
+                const dateData = dashboardData["2025-04-30"];
+                const labels = Object.keys(dateData.models);
+                // Models Signals Chart
+                new Chart(document.getElementById('modelsChart'), {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Model Signal',
+                            data: labels.map(k => dateData.models[k].signal)
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { beginAtZero: true } }
+                    }
+                });
+
+                // Capital Allocations Chart
+                new Chart(document.getElementById('allocationsChart'), {
+                    type: 'pie',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Capital Allocations',
+                            data: labels.map(k => dateData.capital_allocations[k])
+                        }]
+                    },
+                    options: { responsive: true }
+                });
+
+                // Finance OHLC Chart (close prices)
+                new Chart(document.getElementById('financeChart'), {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Open',
+                                data: labels.map(k => dateData.finance[k].open),
+                                fill: false
+                            },
+                            {
+                                label: 'High',
+                                data: labels.map(k => dateData.finance[k].high),
+                                fill: false
+                            },
+                            {
+                                label: 'Low',
+                                data: labels.map(k => dateData.finance[k].low),
+                                fill: false
+                            },
+                            {
+                                label: 'Close',
+                                data: labels.map(k => dateData.finance[k].close),
+                                fill: false
+                            }
+                        ]
+                    },
+                    options: { responsive: true }
+                });
+
+                // Trades Actions Chart (amounts)
+                new Chart(document.getElementById('tradesChart'), {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Trade Amount',
+                            data: labels.map(k => dateData.trades[k].amount)
+                        }]
+                    },
+                    options: { responsive: true }
+                });
+            })
+            .catch(error => console.error('Error loading data:', error));
+    </script>
+</body>
+</html>

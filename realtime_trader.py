@@ -1,0 +1,255 @@
+import os
+import sys
+import json
+import time
+import argparse
+import logging
+from pathlib import Path
+from datetime import datetime, date, timedelta, time as dtime, timezone
+
+import joblib
+import yfinance as yf
+import pandas as pd
+
+# Import feature and backtest utilities from main pipeline
+from main import prepare_features, get_feature_columns, get_data, Config
+
+
+def load_best_models():
+    """Load the latest metrics summary and return best model name by Sharpe for each symbol."""
+    metrics_dir = Config.METRICS_DIR
+    csvs = sorted(metrics_dir.glob('summary_*.csv'))
+    if not csvs:
+        logger.warning("No metrics summary CSV found; defaulting to all models")
+        return {}
+    df = pd.read_csv(csvs[-1])
+    # pick best model per symbol by Sharpe Ratio
+    best = df.loc[df.groupby('symbol')['Sharpe Ratio'].idxmax()]
+    return dict(zip(best['symbol'], best['model']))
+
+# --------------------------- Logging Setup --------------------------- #
+BASE_DIR = Path(__file__).parent.resolve()
+LOG_FILE = BASE_DIR / 'realtime_trading.log'
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(LOG_FILE)
+    ]
+)
+logger = logging.getLogger('realtime')
+
+# -------------------------- Dashboard Utils -------------------------- #
+DASHBOARD_PATH = BASE_DIR / 'dashboard.json'
+
+def load_dashboard():
+    if DASHBOARD_PATH.exists():
+        with open(DASHBOARD_PATH, 'r') as f:
+            return json.load(f)
+    return {}
+
+
+def save_dashboard(dashboard):
+    with open(DASHBOARD_PATH, 'w') as f:
+        json.dump(dashboard, f, indent=2, default=str)
+
+
+def get_last_sharpe(dashboard, model_key):
+    for run_date in sorted(dashboard.keys(), reverse=True):
+        info = dashboard[run_date].get('models', {}).get(model_key)
+        if info and 'sharpe' in info:
+            return info['sharpe']
+    return None
+
+# ------------------------- Trading Components ------------------------ #
+def find_models(models_dir: Path, symbols=None):
+    files = list(models_dir.glob('*.joblib'))
+    latest = {}
+    for f in files:
+        parts = f.stem.split('_')  # symbol_modelname_timestamp
+        if len(parts) < 3:
+            continue
+        symbol, model_name = parts[0], parts[1]
+        if symbols and symbol not in symbols:
+            continue
+        key = f"{symbol}_{model_name}"
+        ts = parts[2]
+        if key not in latest or ts > latest[key].stem.split('_')[2]:
+            latest[key] = f
+    return latest
+
+
+def select_qualified(latest_models, dashboard, min_sharpe=1.0):
+    qualified = {}
+    for key, path in latest_models.items():
+        last_sharpe = get_last_sharpe(dashboard, key) or 0.0
+        if last_sharpe >= min_sharpe:
+            qualified[key] = path
+        else:
+            logger.info(f"Skipping {key}, last Sharpe={last_sharpe:.2f} < {min_sharpe}")
+    return qualified
+
+
+def fetch_daily_finance(symbol: str):
+    ticker = yf.Ticker(symbol)
+    df = ticker.history(period='1d')
+    if df.empty:
+        logger.warning(f"No daily data for {symbol}")
+        return {}
+    row = df.iloc[0]
+    return {
+        'open': float(row['Open']),
+        'high': float(row['High']),
+        'low': float(row['Low']),
+        'close': float(row['Close']),
+        'volume': int(row['Volume'])
+    }
+
+
+def retrain_and_evaluate(model_path: Path, symbol: str, prev_sharpe: float):
+    model = joblib.load(model_path)
+    # load and prepare full data
+    df_raw = get_data(symbol)
+    df_feat = prepare_features(df_raw)
+    feats = get_feature_columns(df_feat)
+    # train and evaluate like in main.py
+    models, metrics = train_and_evaluate(df_feat, feats, symbol)
+    # select best model by Sharpe Ratio
+    best_idx = metrics['Sharpe Ratio'].idxmax()
+    best_row = metrics.loc[best_idx]
+    best_name = best_row['model']
+    best_sharpe = best_row['Sharpe Ratio']
+    best_model = models[best_name]
+    # skip retraining if no improvement
+    if best_sharpe <= prev_sharpe:
+        logger.info(f"Skipping retrain for {model_path.name}: previous Sharpe {prev_sharpe:.2f}, best {best_sharpe:.2f}")
+        return model_path, prev_sharpe, None
+    # save (overwrite) new best model
+    joblib.dump(best_model, model_path)
+    logger.info(f"Overwrote {model_path.name}: Sharpe {prev_sharpe:.2f} -> {best_sharpe:.2f}")
+    # backtest best model on test set (80/20 split)
+    split = int(len(df_feat) * 0.8)
+    test = df_feat.iloc[split:]
+    eq, _, _ = backtest_model(df_feat, feats, best_model, test, 0.0)
+    return model_path, best_sharpe, eq
+
+
+def generate_signal(model_path: Path, symbol: str):
+    model = joblib.load(model_path)
+    df_raw = get_data(symbol)
+    df_feat = prepare_features(df_raw)
+    feats = get_feature_columns(df_feat)
+    latest = df_feat.iloc[-1:]
+    prob = model.predict_proba(latest[feats].values)[0,1]
+    if prob > 0.55:
+        return 1
+    if prob < 0.45:
+        return -1
+    return 0
+
+
+def allocate_capital(sharpes: dict, total_capital: float):
+    total = sum(sharpes.values())
+    if total == 0:
+        return {k: 0.0 for k in sharpes}
+    return {k: total_capital * (v/total) for k, v in sharpes.items()}
+
+
+def execute_orders(signals: dict, allocations: dict):
+    trades = {}
+    for key, sig in signals.items():
+        action = 'buy' if sig > 0 else 'sell' if sig < 0 else 'hold'
+        amt = allocations.get(key, 0)
+        trades[key] = {'action': action, 'amount': amt}
+        logger.info(f"Order: {key} -> {action} ${amt:.2f}")
+    return trades
+
+# -------------------------- Main Routine ---------------------------- #
+def run_day(capital: float, symbols: list):
+    today = date.today().isoformat()
+    dashboard = load_dashboard()
+    dashboard.setdefault(today, {'models': {}, 'capital_allocations': {}, 'finance': {}})
+
+    # select best pre-trained model per symbol based on metrics
+    best_models = load_best_models()
+    latest = find_models(Config.MODELS_DIR, symbols)
+    selected_models = {}
+    for symbol in symbols:
+        model_name = best_models.get(symbol)
+        if model_name:
+            key = f"{symbol}_{model_name}"
+            path = latest.get(key)
+            if path:
+                selected_models[symbol] = path
+            else:
+                logger.warning(f"No model file for {key}")
+        else:
+            logger.warning(f"No metrics entry for {symbol}")
+
+    # generate signals
+    signals = {}
+    day_models = {}
+    for symbol, path in selected_models.items():
+        sig = generate_signal(path, symbol)
+        signals[symbol] = sig
+        day_models[symbol] = {
+            'model': path.name,
+            'signal': sig
+        }
+    dashboard[today]['models'] = day_models
+
+    # allocate capital equally among buy signals
+    buys = [s for s, v in signals.items() if v > 0]
+    if buys:
+        per = capital / len(buys)
+        allocs = {s: (per if signals[s] > 0 else 0.0) for s in signals}
+    else:
+        allocs = {s: 0.0 for s in signals}
+    dashboard[today]['capital_allocations'] = allocs
+
+    # execute orders
+    trades = {}
+    for s, sig in signals.items():
+        amt = allocs.get(s, 0.0)
+        if sig > 0:
+            action = 'buy'
+        elif sig < 0:
+            action = 'sell'
+        else:
+            action = 'hold'
+        trades[s] = {'action': action, 'amount': amt}
+    dashboard[today]['trades'] = trades
+
+    # fetch latest price info
+    finance = {}
+    for symbol in symbols:
+        finance[symbol] = fetch_daily_finance(symbol)
+    dashboard[today]['finance'] = finance
+
+    # plot equity curves
+
+    save_dashboard(dashboard)
+    logger.info(f"Completed run for {today}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--symbols', nargs='+', required=True, help='List of symbols to trade')
+    parser.add_argument('--capital', type=float, default=10000, help='Total capital to allocate')
+    args = parser.parse_args()
+    logger.info(f"Starting realtime trading for symbols {args.symbols} with capital ${args.capital:.2f}")
+    while True:
+        try:
+            run_day(args.capital, args.symbols)
+        except Exception as e:
+            logger.exception(f"Error in daily run: {e}")
+        # sleep until next UTC midnight + 5 minutes
+        now = datetime.now(timezone.utc)
+        next_run = datetime.combine(now.date() + timedelta(days=1), dtime(0,5), tzinfo=timezone.utc)
+        sleep_secs = (next_run - now).total_seconds()
+        logger.info(f"Sleeping {sleep_secs/3600:.2f}h until next run at {next_run.isoformat()}")
+        time.sleep(max(sleep_secs, 0))
+
+if __name__ == '__main__':
+    main()

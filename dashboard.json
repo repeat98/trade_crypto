@@ -1,0 +1,92 @@
+{
+  "2025-04-30": {
+    "models": {
+      "XMR-USD": {
+        "model": "XMR-USD_XGB_20250430_121406.joblib",
+        "signal": -1
+      },
+      "BTC-USD": {
+        "model": "BTC-USD_STACK_20250430_121134.joblib",
+        "signal": 0
+      },
+      "AVAX-USD": {
+        "model": "AVAX-USD_RF_20250430_121321.joblib",
+        "signal": 0
+      },
+      "SOL-USD": {
+        "model": "SOL-USD_XGB_20250430_121240.joblib",
+        "signal": 1
+      },
+      "NEAR-USD": {
+        "model": "NEAR-USD_RF_20250430_121348.joblib",
+        "signal": 0
+      }
+    },
+    "capital_allocations": {
+      "XMR-USD": 0.0,
+      "BTC-USD": 0.0,
+      "AVAX-USD": 0.0,
+      "SOL-USD": 1000.0,
+      "NEAR-USD": 0.0
+    },
+    "finance": {
+      "XMR-USD": {
+        "open": 270.0898132324219,
+        "high": 281.3652648925781,
+        "low": 269.7861633300781,
+        "close": 272.0665283203125,
+        "volume": 118142816
+      },
+      "BTC-USD": {
+        "open": 94275.1171875,
+        "high": 95208.84375,
+        "low": 94200.046875,
+        "close": 94949.78125,
+        "volume": 24318910464
+      },
+      "AVAX-USD": {
+        "open": 21.55048370361328,
+        "high": 21.89081573486328,
+        "low": 21.475631713867188,
+        "close": 21.509366989135742,
+        "volume": 261298992
+      },
+      "SOL-USD": {
+        "open": 146.4016876220703,
+        "high": 148.16549682617188,
+        "low": 145.33642578125,
+        "close": 147.25909423828125,
+        "volume": 2527240448
+      },
+      "NEAR-USD": {
+        "open": 2.530089855194092,
+        "high": 2.54801869392395,
+        "low": 2.501046895980835,
+        "close": 2.5154099464416504,
+        "volume": 125977384
+      }
+    },
+    "trades": {
+      "XMR-USD": {
+        "action": "sell",
+        "amount": 0.0
+      },
+      "BTC-USD": {
+        "action": "hold",
+        "amount": 0.0
+      },
+      "AVAX-USD": {
+        "action": "hold",
+        "amount": 0.0
+      },
+      "SOL-USD": {
+        "action": "buy",
+        "amount": 1000.0
+      },
+      "NEAR-USD": {
+        "action": "hold",
+        "amount": 0.0
+      }
+    }
+  }
+}

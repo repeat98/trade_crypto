@@ -1,51 +1,29 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from flask import Flask, send_from_directory, jsonify
+import json
+import os
 
-from advice import (
-    load_models,
-    make_prediction,
-    get_curve_data,
-    SYMBOLS,
-    schedule_daily,
-    daily_job,
-    scheduler
-)
+app = Flask(__name__, static_folder='.')
 
-app = FastAPI(title="Crypto Trading Advice Service")
+# Load dashboard data
+try:
+    with open('dashboard.json', 'r') as f:
+        dashboard_data = json.load(f)
+except FileNotFoundError:
+    print("Warning: dashboard.json not found. Using empty data.")
+    dashboard_data = {}
 
-@app.on_event("startup")
-async def startup_event():
-    schedule_daily()
-    scheduler.start()
-    await daily_job()
+@app.route('/')
+def index():
+    # serve your index.html
+    return send_from_directory('.', 'index.html')
 
-# preload
-models = load_models(SYMBOLS)
+@app.route('/data')
+def data():
+    try:
+        return jsonify(dashboard_data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-templates = Jinja2Templates(directory="templates")
-
-@app.get("/advice/{symbol}", response_model=dict)
-def get_advice(symbol: str):
-    if symbol not in models:
-        raise HTTPException(status_code=404, detail="Symbol not loaded")
-    return {symbol: make_prediction(symbol)}
-
-@app.get("/advice", response_model=dict)
-def get_all_advice():
-    return {sym: make_prediction(sym) for sym in SYMBOLS}
-
-@app.get("/curve/{symbol}", response_class=JSONResponse)
-def curve(symbol: str, days: int = 30):
-    if symbol not in SYMBOLS:
-        raise HTTPException(status_code=404, detail="Unknown symbol")
-    return JSONResponse(content=get_curve_data(symbol, days))
-
-@app.get("/", response_class=HTMLResponse)
-def web_ui(request: Request):
-    data = get_all_advice()
-    return templates.TemplateResponse("index.html", {"request": request, "data": data})
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+if __name__ == '__main__':
+    # listen on all interfaces on port 8000
+    app.run(host='0.0.0.0', port=8000, debug=True)
