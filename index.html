@@ -2,100 +2,235 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Crypto Dashboard - 2025-04-30</title>
+    <title>Crypto Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px; }
-        h1 { text-align: center; }
-        .chart-container { width: 600px; margin: 40px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        body { 
+            font-family: Arial, sans-serif; 
+            background: #f4f4f4; 
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 { 
+            text-align: center; 
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .chart-container { 
+            width: 100%; 
+            margin: 20px auto; 
+            background: #fff; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+        }
+        .symbol-selector {
+            margin: 20px 0;
+            text-align: center;
+        }
+        select {
+            padding: 8px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
     </style>
 </head>
 <body>
-    <h1>Crypto Dashboard for 2025-04-30</h1>
-    <div class="chart-container"><canvas id="modelsChart"></canvas></div>
-    <div class="chart-container"><canvas id="allocationsChart"></canvas></div>
-    <div class="chart-container"><canvas id="financeChart"></canvas></div>
-    <div class="chart-container"><canvas id="tradesChart"></canvas></div>
+    <h1>Crypto Trading Dashboard</h1>
+    <div class="grid">
+        <div class="chart-container">
+            <h2>Model Signals</h2>
+            <canvas id="signalsChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h2>Equity Over Time</h2>
+            <canvas id="equityChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h2>Price Data</h2>
+            <div class="symbol-selector">
+                <select id="symbolSelector">
+                    <option value="">Select Symbol</option>
+                </select>
+            </div>
+            <canvas id="priceChart"></canvas>
+        </div>
+    </div>
 
     <script>
         fetch('/data')
             .then(response => response.json())
             .then(dashboardData => {
-                const dateData = dashboardData["2025-04-30"];
+                // Get the latest date
+                const dates = Object.keys(dashboardData).sort();
+                const latestDate = dates[dates.length - 1];
+                const dateData = dashboardData[latestDate];
                 const labels = Object.keys(dateData.models);
-                // Models Signals Chart
-                new Chart(document.getElementById('modelsChart'), {
+                
+                // Populate symbol selector
+                const symbolSelector = document.getElementById('symbolSelector');
+                labels.forEach(symbol => {
+                    const option = document.createElement('option');
+                    option.value = symbol;
+                    option.textContent = symbol;
+                    symbolSelector.appendChild(option);
+                });
+
+                // Signals Chart
+                new Chart(document.getElementById('signalsChart'), {
                     type: 'bar',
                     data: {
                         labels: labels,
                         datasets: [{
-                            label: 'Model Signal',
-                            data: labels.map(k => dateData.models[k].signal)
+                            label: 'Signal',
+                            data: labels.map(k => dateData.models[k].signal),
+                            backgroundColor: labels.map(k => {
+                                const signal = dateData.models[k].signal;
+                                return signal > 0 ? 'rgba(75, 192, 192, 0.6)' : 
+                                       signal < 0 ? 'rgba(255, 99, 132, 0.6)' : 
+                                       'rgba(255, 206, 86, 0.6)';
+                            })
                         }]
                     },
                     options: {
                         responsive: true,
-                        plugins: { legend: { display: false } },
-                        scales: { y: { beginAtZero: true } }
+                        plugins: { 
+                            legend: { display: false },
+                            title: { display: true, text: `Signals for ${latestDate}` }
+                        },
+                        scales: { 
+                            y: { 
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: value => {
+                                        if (value > 0) return 'Buy';
+                                        if (value < 0) return 'Sell';
+                                        return 'Hold';
+                                    }
+                                }
+                            }
+                        }
                     }
                 });
 
-                // Capital Allocations Chart
-                new Chart(document.getElementById('allocationsChart'), {
-                    type: 'pie',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Capital Allocations',
-                            data: labels.map(k => dateData.capital_allocations[k])
-                        }]
-                    },
-                    options: { responsive: true }
+                // Equity Chart
+                const equityData = {};
+                labels.forEach(symbol => {
+                    equityData[symbol] = dates.map(date => dashboardData[date].equity[symbol] || null);
                 });
 
-                // Finance OHLC Chart (close prices)
-                new Chart(document.getElementById('financeChart'), {
+                new Chart(document.getElementById('equityChart'), {
                     type: 'line',
                     data: {
-                        labels: labels,
-                        datasets: [
-                            {
-                                label: 'Open',
-                                data: labels.map(k => dateData.finance[k].open),
-                                fill: false
-                            },
-                            {
-                                label: 'High',
-                                data: labels.map(k => dateData.finance[k].high),
-                                fill: false
-                            },
-                            {
-                                label: 'Low',
-                                data: labels.map(k => dateData.finance[k].low),
-                                fill: false
-                            },
-                            {
-                                label: 'Close',
-                                data: labels.map(k => dateData.finance[k].close),
-                                fill: false
-                            }
-                        ]
+                        labels: dates,
+                        datasets: labels.map(symbol => ({
+                            label: symbol,
+                            data: equityData[symbol],
+                            borderColor: `hsl(${Math.random() * 360}, 70%, 50%)`,
+                            fill: false
+                        }))
                     },
-                    options: { responsive: true }
+                    options: {
+                        responsive: true,
+                        plugins: { 
+                            title: { display: true, text: 'Equity Over Time' }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Equity Value' }
+                            },
+                            x: {
+                                title: { display: true, text: 'Date' }
+                            }
+                        }
+                    }
                 });
 
-                // Trades Actions Chart (amounts)
-                new Chart(document.getElementById('tradesChart'), {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Trade Amount',
-                            data: labels.map(k => dateData.trades[k].amount)
-                        }]
-                    },
-                    options: { responsive: true }
+                // Price Chart
+                let priceChart = null;
+                function updatePriceChart(symbol) {
+                    if (!symbol) return;
+                    
+                    const priceData = {
+                        open: dates.map(date => dashboardData[date]?.prices?.[symbol]?.open || null),
+                        high: dates.map(date => dashboardData[date]?.prices?.[symbol]?.high || null),
+                        low: dates.map(date => dashboardData[date]?.prices?.[symbol]?.low || null),
+                        close: dates.map(date => dashboardData[date]?.prices?.[symbol]?.close || null)
+                    };
+
+                    if (priceChart) {
+                        priceChart.destroy();
+                    }
+
+                    priceChart = new Chart(document.getElementById('priceChart'), {
+                        type: 'line',
+                        data: {
+                            labels: dates,
+                            datasets: [
+                                {
+                                    label: 'Open',
+                                    data: priceData.open,
+                                    borderColor: 'rgba(75, 192, 192, 1)',
+                                    fill: false,
+                                    tension: 0.1
+                                },
+                                {
+                                    label: 'High',
+                                    data: priceData.high,
+                                    borderColor: 'rgba(255, 99, 132, 1)',
+                                    fill: false,
+                                    tension: 0.1
+                                },
+                                {
+                                    label: 'Low',
+                                    data: priceData.low,
+                                    borderColor: 'rgba(255, 206, 86, 1)',
+                                    fill: false,
+                                    tension: 0.1
+                                },
+                                {
+                                    label: 'Close',
+                                    data: priceData.close,
+                                    borderColor: 'rgba(54, 162, 235, 1)',
+                                    fill: false,
+                                    tension: 0.1
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: { 
+                                title: { display: true, text: `${symbol} Price Data` }
+                            },
+                            scales: {
+                                y: {
+                                    title: { display: true, text: 'Price' }
+                                },
+                                x: {
+                                    title: { display: true, text: 'Date' }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                symbolSelector.addEventListener('change', (e) => {
+                    updatePriceChart(e.target.value);
                 });
+
+                // Initialize with first symbol if available
+                if (labels.length > 0) {
+                    symbolSelector.value = labels[0];
+                    updatePriceChart(labels[0]);
+                }
             })
             .catch(error => console.error('Error loading data:', error));
     </script>

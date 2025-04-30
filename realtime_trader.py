@@ -169,7 +169,7 @@ def execute_orders(signals: dict, allocations: dict):
 def run_day(capital: float, symbols: list):
     today = date.today().isoformat()
     dashboard = load_dashboard()
-    dashboard.setdefault(today, {'models': {}, 'capital_allocations': {}, 'finance': {}})
+    dashboard.setdefault(today, {'models': {}, 'equity': {}, 'actions': {}, 'prices': {}})
 
     # select best pre-trained model per symbol based on metrics
     best_models = load_best_models()
@@ -187,47 +187,57 @@ def run_day(capital: float, symbols: list):
         else:
             logger.warning(f"No metrics entry for {symbol}")
 
-    # generate signals
+    # generate signals and track equity
     signals = {}
     day_models = {}
+    equity = {}
+    actions = {}
+    prices = {}
+    
     for symbol, path in selected_models.items():
+        # Generate signal
         sig = generate_signal(path, symbol)
         signals[symbol] = sig
+        
+        # Store model info
         day_models[symbol] = {
             'model': path.name,
             'signal': sig
         }
+        
+        # Get latest price data for equity calculation
+        price_data = fetch_daily_finance(symbol)
+        if not price_data:
+            continue
+            
+        # Store price data
+        prices[symbol] = {
+            'open': price_data['open'],
+            'high': price_data['high'],
+            'low': price_data['low'],
+            'close': price_data['close']
+        }
+            
+        # Calculate equity based on previous day's position and today's price change
+        prev_equity = dashboard.get(today, {}).get('equity', {}).get(symbol, capital/len(symbols))
+        price_change = (price_data['close'] - price_data['open']) / price_data['open']
+        
+        # Update equity based on signal
+        if sig > 0:  # Buy signal
+            equity[symbol] = prev_equity * (1 + price_change)
+            actions[symbol] = 'buy'
+        elif sig < 0:  # Sell signal
+            equity[symbol] = prev_equity * (1 - price_change)
+            actions[symbol] = 'sell'
+        else:  # Hold signal
+            equity[symbol] = prev_equity
+            actions[symbol] = 'hold'
+
+    # Update dashboard
     dashboard[today]['models'] = day_models
-
-    # allocate capital equally among buy signals
-    buys = [s for s, v in signals.items() if v > 0]
-    if buys:
-        per = capital / len(buys)
-        allocs = {s: (per if signals[s] > 0 else 0.0) for s in signals}
-    else:
-        allocs = {s: 0.0 for s in signals}
-    dashboard[today]['capital_allocations'] = allocs
-
-    # execute orders
-    trades = {}
-    for s, sig in signals.items():
-        amt = allocs.get(s, 0.0)
-        if sig > 0:
-            action = 'buy'
-        elif sig < 0:
-            action = 'sell'
-        else:
-            action = 'hold'
-        trades[s] = {'action': action, 'amount': amt}
-    dashboard[today]['trades'] = trades
-
-    # fetch latest price info
-    finance = {}
-    for symbol in symbols:
-        finance[symbol] = fetch_daily_finance(symbol)
-    dashboard[today]['finance'] = finance
-
-    # plot equity curves
+    dashboard[today]['equity'] = equity
+    dashboard[today]['actions'] = actions
+    dashboard[today]['prices'] = prices
 
     save_dashboard(dashboard)
     logger.info(f"Completed run for {today}")
